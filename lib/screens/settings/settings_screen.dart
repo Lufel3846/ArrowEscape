@@ -48,6 +48,109 @@ class SettingsScreen extends ConsumerWidget {
             children: [
               const SizedBox(height: 20),
               const Text(
+                'THEME & CUSTOM SKIN',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textSecondary,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 64,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: GameTheme.values.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: 12),
+                  itemBuilder: (context, index) {
+                    final theme = GameTheme.values[index];
+                    final isSelected = progress.selectedTheme == theme;
+                    final isDefaultUnlocked =
+                        theme == GameTheme.classic ||
+                        theme == GameTheme.neon ||
+                        theme == GameTheme.retro ||
+                        theme == GameTheme.cyber;
+                    final isLocked =
+                        !isDefaultUnlocked && !progress.skinsUnlocked;
+                    final previewColors = AppThemes.getThemeColors(theme);
+
+                    return GestureDetector(
+                      onTap: () {
+                        if (isLocked) {
+                          _showUnlockDialog(context, ref);
+                        } else {
+                          ref.read(progressRepositoryProvider).setTheme(theme);
+                        }
+                      },
+                      child: Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: previewColors.bgGradient,
+                          border: Border.all(
+                            color: isSelected
+                                ? previewColors.accentColor
+                                : AppColors.surfaceLight,
+                            width: isSelected ? 3 : 1.5,
+                          ),
+                        ),
+                        child: Center(
+                          child: isLocked
+                              ? const Icon(
+                                  Icons.lock,
+                                  color: AppColors.textMuted,
+                                  size: 20,
+                                )
+                              : Container(
+                                  width: 24,
+                                  height: 24,
+                                  decoration: previewColors.arrowPalette != null
+                                      ? const BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          gradient: SweepGradient(
+                                            colors: [
+                                              Color(0xFFFF5252),
+                                              Color(0xFFFF9100),
+                                              Color(0xFFFFEA00),
+                                              Color(0xFF00E676),
+                                              Color(0xFF00E5FF),
+                                              Color(0xFF7C4DFF),
+                                              Color(0xFFFF4081),
+                                              Color(0xFFFF5252),
+                                            ],
+                                          ),
+                                        )
+                                      : BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: previewColors.arrowColor,
+                                          border: Border.all(
+                                            color: Colors.white24,
+                                            width: 1,
+                                          ),
+                                        ),
+                                  child: isSelected
+                                      ? Icon(
+                                          Icons.check,
+                                          size: 16,
+                                          color: previewColors.arrowColor
+                                                      .computeLuminance() >
+                                                  0.5
+                                              ? Colors.black
+                                              : Colors.white,
+                                        )
+                                      : null,
+                                ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
                 'PREFERENCES',
                 style: TextStyle(
                   fontSize: 16,
@@ -93,140 +196,6 @@ class SettingsScreen extends ConsumerWidget {
                     ref.read(progressRepositoryProvider).toggleComplexPaths(),
                 accentColor: themeColors.accentColor,
               ),
-              const SizedBox(height: 24),
-              const Text(
-                'THEME & CUSTOM SKIN',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textSecondary,
-                  letterSpacing: 1.5,
-                ),
-              ),
-              const SizedBox(height: 16),
-              ...GameTheme.values.map((theme) {
-                final isSelected = progress.selectedTheme == theme;
-                final isDefaultUnlocked =
-                    theme == GameTheme.classic ||
-                    theme == GameTheme.neon ||
-                    theme == GameTheme.retro ||
-                    theme == GameTheme.cyber;
-                final isLocked = !isDefaultUnlocked && !progress.skinsUnlocked;
-                final previewColors = AppThemes.getThemeColors(theme);
-                return GestureDetector(
-                  onTap: () {
-                    if (isLocked) {
-                      _showUnlockDialog(context, ref);
-                    } else {
-                      ref.read(progressRepositoryProvider).setTheme(theme);
-                    }
-                  },
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 14),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 18,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: isSelected
-                            ? previewColors.accentColor
-                            : AppColors.surfaceLight,
-                        width: 2,
-                      ),
-                      boxShadow: isSelected
-                          ? [
-                              BoxShadow(
-                                color: previewColors.accentDark.withValues(
-                                  alpha: 0.4,
-                                ),
-                                offset: const Offset(0, 4),
-                                blurRadius: 0,
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          theme.name.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            color: isSelected
-                                ? previewColors.accentColor
-                                : (isLocked
-                                      ? AppColors.textMuted
-                                      : AppColors.textPrimary),
-                            letterSpacing: 1.5,
-                          ),
-                        ),
-                        Row(
-                          children: [
-                            if (isLocked) ...[
-                              const Icon(
-                                Icons.lock,
-                                color: AppColors.textMuted,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
-                            ],
-                            if (previewColors.arrowPalette != null)
-                              Container(
-                                width: 24,
-                                height: 24,
-                                decoration: const BoxDecoration(
-                                  gradient: SweepGradient(
-                                    colors: [
-                                      Color(0xFFFF5252),
-                                      Color(0xFFFF9100),
-                                      Color(0xFFFFEA00),
-                                      Color(0xFF00E676),
-                                      Color(0xFF00E5FF),
-                                      Color(0xFF7C4DFF),
-                                      Color(0xFFFF4081),
-                                      Color(0xFFFF5252),
-                                    ],
-                                  ),
-                                  shape: BoxShape.circle,
-                                ),
-                              )
-                            else
-                              Container(
-                                width: 24,
-                                height: 24,
-                                decoration: BoxDecoration(
-                                  color: previewColors.arrowColor,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: Colors.white24,
-                                    width: 1,
-                                  ),
-                                ),
-                              ),
-                            const SizedBox(width: 8),
-                            Container(
-                              width: 24,
-                              height: 24,
-                              decoration: BoxDecoration(
-                                gradient: previewColors.bgGradient,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white24,
-                                  width: 1,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }),
             ],
           ),
         ),

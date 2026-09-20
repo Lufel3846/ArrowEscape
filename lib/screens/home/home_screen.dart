@@ -12,6 +12,7 @@ import '../../core/game_mode.dart';
 import '../../main.dart';
 import '../game/game_screen.dart';
 import '../level_select/level_select_screen.dart';
+import '../multiplayer/multiplayer_seed_screen.dart';
 import '../settings/settings_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -473,6 +474,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       _MenuButton(
                         label: 'RANDOM',
                         onTap: _isNavigating ? null : _showRandomPuzzleDialog,
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      _MenuButton(
+                        label: 'MULTIPLAYER',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const MultiplayerSeedScreen(),
+                          ),
+                        ),
                       ),
 
                       const SizedBox(height: 14),

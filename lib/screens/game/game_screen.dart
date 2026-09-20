@@ -118,8 +118,6 @@ class _GameScreenState extends ConsumerState<GameScreen>
   String? _comboText;
   Timer? _comboTimer;
 
-  final List<_Particle> _particles = [];
-
   void _triggerShake() {
     _shakeTimer?.cancel();
     int count = 0;
@@ -147,24 +145,6 @@ class _GameScreenState extends ConsumerState<GameScreen>
     });
     _comboTimer = Timer(const Duration(milliseconds: 900), () {
       if (mounted) setState(() => _comboText = null);
-    });
-  }
-
-  void _addParticleBurst(Offset offset, Color color) {
-    if (!mounted) return;
-    final random = Random();
-    final newParticles = List.generate(18, (i) {
-      final angle = random.nextDouble() * 2 * pi;
-      final speed = 70.0 + random.nextDouble() * 150.0;
-      return _Particle(
-        position: offset,
-        velocity: Offset(cos(angle) * speed, sin(angle) * speed),
-        color: color,
-        maxLife: 0.35 + random.nextDouble() * 0.25,
-      );
-    });
-    setState(() {
-      _particles.addAll(newParticles);
     });
   }
 
@@ -211,7 +191,6 @@ class _GameScreenState extends ConsumerState<GameScreen>
       gameMode: widget.gameMode,
       onCombo: _triggerCombo,
       onCameraShake: _triggerShake,
-      onParticleBurst: _addParticleBurst,
     );
     _gameState!.addListener(_onGameStateChanged);
 
@@ -1428,19 +1407,4 @@ class _LevelLoadingScreen extends StatelessWidget {
       ),
     );
   }
-}
-
-class _Particle {
-  Offset position;
-  Offset velocity;
-  Color color;
-  double maxLife;
-  double life = 0.0;
-
-  _Particle({
-    required this.position,
-    required this.velocity,
-    required this.color,
-    required this.maxLife,
-  });
 }

@@ -12,10 +12,7 @@ class LevelSelectScreen extends ConsumerWidget {
   const LevelSelectScreen({super.key});
 
   static int _calculateTotalVisible(int highestUnlocked) {
-    if (highestUnlocked < 40) return 60;
-    
-    final extra = ((highestUnlocked - 40) ~/ 20) * 20;
-    return 60 + extra;
+    return highestUnlocked + 10;
   }
 
   @override

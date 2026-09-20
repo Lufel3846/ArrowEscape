@@ -2,6 +2,8 @@
 
 Unwind and challenge your brain with Arrow Escape, a clean, minimalist puzzle game built purely for the love of play.
 
+[![AI-DECLARATION: copilot](https://img.shields.io/badge/䷼%20AI--DECLARATION-copilot-fee2e2?labelColor=fee2e2)](AI-DECLARATION.md)
+
 
 ---
 

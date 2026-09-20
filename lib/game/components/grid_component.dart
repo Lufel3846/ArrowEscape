@@ -15,6 +15,15 @@ class GridComponent extends PositionComponent with TapCallbacks {
 
   final Map<String, ArrowComponent> _arrowComponents = {};
   late Set<String> _mask;
+  int _lastOrphanDotsLength = -1;
+  final List<({int r, int c, OrphanDotType type})> _parsedOrphanDots = [];
+
+  static final Paint _orphanFillPaint = Paint()..style = PaintingStyle.fill;
+  static final Paint _orphanStrokePaint = Paint()..style = PaintingStyle.stroke;
+  static final Paint _orphanLinePaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round;
+  static final Paint _orphanArrowheadPaint = Paint()..style = PaintingStyle.fill;
 
   ui.Picture? _cachedDotGridPicture;
   double _entryTime = 0.0;
@@ -141,6 +150,7 @@ class GridComponent extends PositionComponent with TapCallbacks {
         arrowModel: arrow,
         cellSize: cellSize,
         gameState: gameState,
+        onExitCompleted: () => _arrowComponents.remove(arrow.id),
       )..position = Vector2(0, 0);
       _arrowComponents[arrow.id] = comp;
       add(comp);
@@ -150,6 +160,7 @@ class GridComponent extends PositionComponent with TapCallbacks {
   void rebuild() {
     _refreshMask();
     _buildArrows();
+    _lastOrphanDotsLength = -1;
     _invalidateDotGrid();
   }
 
@@ -238,38 +249,46 @@ class GridComponent extends PositionComponent with TapCallbacks {
     }
 
     final themeColors = AppThemes.getThemeColors(gameState.theme);
-    final orphanDots = gameState.orphanDots;
-    for (final entry in orphanDots.entries) {
-      final parts = entry.key.split(',');
-      final dotR = int.parse(parts[0]);
-      final dotC = int.parse(parts[1]);
-      _drawOrphanDot(canvas, Offset((dotC + 0.5) * cs, (dotR + 0.5) * cs),
-          entry.value, cs, themeColors);
+    _updateParsedOrphanDots();
+    for (final dot in _parsedOrphanDots) {
+      _drawOrphanDot(
+        canvas,
+        Offset((dot.c + 0.5) * cs, (dot.r + 0.5) * cs),
+        dot.type,
+        cs,
+        themeColors,
+      );
     }
 
     super.render(canvas);
+  }
+
+  void _updateParsedOrphanDots() {
+    final orphanDots = gameState.orphanDots;
+    if (_lastOrphanDotsLength == orphanDots.length) return;
+    _lastOrphanDotsLength = orphanDots.length;
+    _parsedOrphanDots.clear();
+    for (final entry in orphanDots.entries) {
+      final parts = entry.key.split(',');
+      _parsedOrphanDots.add((
+        r: int.parse(parts[0]),
+        c: int.parse(parts[1]),
+        type: entry.value,
+      ));
+    }
   }
 
   static void _drawOrphanDot(
       Canvas canvas, Offset center, OrphanDotType type, double cs, ThemeColors themeColors) {
     if (type == OrphanDotType.neutral) return;
 
-    canvas.drawCircle(
-      center,
-      cs * 0.38,
-      Paint()
-        ..color = const Color(0xFF2A2A2A)
-        ..style = PaintingStyle.fill,
-    );
+    _orphanFillPaint.color = const Color(0xFF2A2A2A);
+    canvas.drawCircle(center, cs * 0.38, _orphanFillPaint);
 
-    canvas.drawCircle(
-      center,
-      cs * 0.38,
-      Paint()
-        ..color = themeColors.arrowColor.withValues(alpha: 0.4)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = cs * 0.04,
-    );
+    _orphanStrokePaint
+      ..color = themeColors.arrowColor.withValues(alpha: 0.4)
+      ..strokeWidth = cs * 0.04;
+    canvas.drawCircle(center, cs * 0.38, _orphanStrokePaint);
 
     final ArrowDirection dir;
     switch (type) {
@@ -284,13 +303,10 @@ class GridComponent extends PositionComponent with TapCallbacks {
     canvas.translate(center.dx, center.dy);
     canvas.rotate(dir.rotationRadians);
 
-    final linePaint = Paint()
+    _orphanLinePaint
       ..color = themeColors.arrowColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = cs * 0.06
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawLine(Offset(-cs * 0.18, 0), Offset(cs * 0.08, 0), linePaint);
+      ..strokeWidth = cs * 0.06;
+    canvas.drawLine(Offset(-cs * 0.18, 0), Offset(cs * 0.08, 0), _orphanLinePaint);
 
     final arrowheadPath = Path()
       ..moveTo(cs * 0.24, 0)
@@ -299,12 +315,8 @@ class GridComponent extends PositionComponent with TapCallbacks {
       ..lineTo(cs * 0.02, cs * 0.14)
       ..close();
 
-    canvas.drawPath(
-      arrowheadPath,
-      Paint()
-        ..color = themeColors.arrowColor
-        ..style = PaintingStyle.fill,
-    );
+    _orphanArrowheadPaint.color = themeColors.arrowColor;
+    canvas.drawPath(arrowheadPath, _orphanArrowheadPaint);
 
     canvas.restore();
   }

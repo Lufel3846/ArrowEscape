@@ -12,6 +12,7 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
   ArrowModel arrowModel;
   double cellSize;
   final GameState gameState;
+  final VoidCallback? onExitCompleted;
 
   bool _isAnimating = false;
   bool _isBlockedAnimating = false;
@@ -52,18 +53,36 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
     _computeBounds();
   }
 
-  bool _arePathsEqual(List<List<int>> a, List<List<int>> b) {
-    if (a.length != b.length) return false;
-    for (int i = 0; i < a.length; i++) {
-      if (a[i][0] != b[i][0] || a[i][1] != b[i][1]) return false;
-    }
-    return true;
-  }
+  static final Paint _bodyPaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round;
+
+  static final Paint _glowPaintOuter = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round;
+
+  static final Paint _glowPaintInner = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round;
+
+  static final Paint _trailPaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round;
+
+  static final Paint _headPaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round;
 
   ArrowComponent({
     required this.arrowModel,
     required this.cellSize,
     required this.gameState,
+    this.onExitCompleted,
   }) : super(size: Vector2.all(cellSize * gameState.level.gridSize)) {
     _computeBounds();
   }
@@ -325,28 +344,10 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
 
     if (_isExiting) {
       _exitProgress += dt / _exitDuration;
-      final themeColors = AppThemes.getThemeColors(gameState.theme);
-
-      if (_exitProgress > 0.05 && _exitProgress < 0.95) {
-        if (_cachedTrack != null && _cachedDist != null && _cachedTailDist != null) {
-          final traveled = (_exitProgress * _cachedTailDist!).clamp(0.0, _cachedTailDist!);
-          final animTail = (_cachedTailDist! - traveled).clamp(0.0, _cachedTailDist!);
-          final tailSlice = _slice(_cachedTrack!, _cachedDist!, animTail, animTail);
-          if (tailSlice.isNotEmpty) {
-            gameState.onParticleBurst?.call(tailSlice.first, themeColors.accentColor);
-          }
-        }
-      }
-
       if (_exitProgress >= 1.0) {
-        final head = arrowModel.path[0];
-        final centerOffset = Offset((head[1] + 0.5) * cellSize, (head[0] + 0.5) * cellSize);
-        final color = themeColors.accentColor;
-        for (int b = 0; b < 2; b++) {
-          gameState.onParticleBurst?.call(centerOffset, color);
-        }
         removeFromParent();
         gameState.handleArrowExitCompleted(arrowModel.id);
+        onExitCompleted?.call();
         return;
       }
     }
@@ -367,42 +368,14 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
         _invalidateCache();
       }
     }
-
-    if (_isExiting || _isBlockedAnimating) {
-      return; 
-    }
-
-    ArrowModel? updated;
-    final list = gameState.arrows;
-    for (int i = 0; i < list.length; i++) {
-      if (list[i].id == arrowModel.id) {
-        updated = list[i];
-        break;
-      }
-    }
-
-    if (updated != null) {
-      if (updated.state == ArrowState.sliding && !_isExiting && !_isAnimating) {
-        _isAnimating = true;
-        _startExitAnimation();
-      } else if (updated.state == ArrowState.blocked && !_isAnimating) {
-        _isAnimating = true;
-        _playBlockAnimation();
-      }
-      if (updated.state != arrowModel.state ||
-          updated.direction != arrowModel.direction ||
-          !_arePathsEqual(updated.path, arrowModel.path)) {
-        _invalidateCache();
-      }
-      arrowModel = updated;
-    }
   }
 
   @override
   void render(Canvas canvas) {
     if (arrowModel.path.isEmpty) return;
 
-    if (_pressScale != 1.0) {
+    final bool hasPressScale = _pressScale != 1.0;
+    if (hasPressScale) {
       final head = arrowModel.path[0];
       final center = Offset((head[1] + 0.5) * cellSize, (head[0] + 0.5) * cellSize);
       canvas.save();
@@ -492,8 +465,6 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
     final mainColor = _color();
     final sw = cellSize * 0.13; 
 
-    canvas.save();
-
     final Path bodyPath;
     if (isAnimatingNow) {
       bodyPath = Path()..moveTo(pts.first.dx, pts.first.dy);
@@ -514,33 +485,28 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
     final themeColors = AppThemes.getThemeColors(gameState.theme);
 
     if (themeColors.hasGlow) {
-      final glowPaint = Paint()
-        ..color = mainColor.withValues(alpha: 0.3)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = sw * 2.5
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0);
-      canvas.drawPath(bodyPath, glowPaint);
+      _glowPaintOuter
+        ..color = mainColor.withValues(alpha: 0.15)
+        ..strokeWidth = sw * 2.2;
+      canvas.drawPath(bodyPath, _glowPaintOuter);
+
+      _glowPaintInner
+        ..color = mainColor.withValues(alpha: 0.25)
+        ..strokeWidth = sw * 1.5;
+      canvas.drawPath(bodyPath, _glowPaintInner);
     }
 
     if (isAnimatingNow) {
-      final trailPaint = Paint()
+      _trailPaint
         ..color = mainColor.withValues(alpha: 0.15)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = sw * 2.0
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round;
-      canvas.drawPath(bodyPath, trailPaint);
+        ..strokeWidth = sw * 2.0;
+      canvas.drawPath(bodyPath, _trailPaint);
     }
 
-    final bodyPaint = Paint()
+    _bodyPaint
       ..color = mainColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = sw
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    canvas.drawPath(bodyPath, bodyPaint);
+      ..strokeWidth = sw;
+    canvas.drawPath(bodyPath, _bodyPaint);
 
     _drawHead(canvas, pts, mainColor, sw);
 
@@ -552,7 +518,9 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
       }
     }
 
-    canvas.restore();
+    if (hasPressScale) {
+      canvas.restore();
+    }
   }
 
   void _drawHead(Canvas canvas, List<Offset> pts, Color mainColor, double sw) {
@@ -566,15 +534,10 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
       caretPath = _cachedCaretPath!;
     }
 
-    canvas.drawPath(
-      caretPath,
-      Paint()
-        ..color = mainColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = sw
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
+    _headPaint
+      ..color = mainColor
+      ..strokeWidth = sw;
+    canvas.drawPath(caretPath, _headPaint);
   }
 
   Path _buildCaretPath(List<Offset> pts, double sw) {
@@ -666,12 +629,11 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
     canvas.drawPath(
       rawPath,
       Paint()
-        ..color = shadowColor.withValues(alpha: (0.35 * pulse).clamp(0.1, 0.6))
+        ..color = shadowColor.withValues(alpha: (0.25 * pulse).clamp(0.05, 0.4))
         ..style = PaintingStyle.stroke
         ..strokeWidth = cellSize * 0.45 * pulse
         ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6.0),
+        ..strokeJoin = StrokeJoin.round,
     );
 
     canvas.drawPath(
@@ -683,10 +645,6 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round,
     );
-
-    if (_pressScale != 1.0) {
-      canvas.restore();
-    }
   }
 
   Color _color() {
