@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../../core/app_colors.dart';
 import '../../core/app_themes.dart';
 import '../../main.dart';
@@ -135,7 +136,8 @@ class SettingsScreen extends ConsumerWidget {
                                       ? Icon(
                                           Icons.check,
                                           size: 16,
-                                          color: previewColors.arrowColor
+                                          color:
+                                              previewColors.arrowColor
                                                       .computeLuminance() >
                                                   0.5
                                               ? Colors.black
@@ -387,11 +389,12 @@ class _UnlockDialogState extends State<_UnlockDialog> {
                         vertical: 12,
                       ),
                     ),
-                    onPressed: () {
+                    onPressed: () async {
                       final code = _controller.text;
-                      final success = widget.ref
+                      final success = await widget.ref
                           .read(progressRepositoryProvider)
                           .unlockSkins(code);
+                      if (!context.mounted) return;
                       if (success) {
                         Navigator.pop(context);
                         ScaffoldMessenger.of(context).showSnackBar(

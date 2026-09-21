@@ -66,6 +66,11 @@ class GameState extends ChangeNotifier {
   
   Map<String, OrphanDotType> get orphanDots => _orphanDots;
 
+  ArrowState? stateForArrow(String arrowId) {
+    final index = _arrows.indexWhere((a) => a.id == arrowId);
+    return index == -1 ? null : _arrows[index].state;
+  }
+
   void handleArrowExitCompleted(String arrowId) {
     _arrows.removeWhere((a) => a.id == arrowId);
     _consumedDotsByArrow.remove(arrowId);

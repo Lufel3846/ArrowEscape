@@ -648,7 +648,10 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
   }
 
   Color _color() {
-    if (arrowModel.state == ArrowState.blocked || _isBlockedAnimating) {
+    final currentState = gameState.stateForArrow(arrowModel.id);
+    if (currentState == ArrowState.blocked ||
+        arrowModel.state == ArrowState.blocked ||
+        _isBlockedAnimating) {
       return const Color(0xFF606060);
     }
     final themeColors = AppThemes.getThemeColors(gameState.theme);

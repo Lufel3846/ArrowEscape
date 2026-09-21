@@ -36,6 +36,8 @@ local.properties
 /coverage/
 /linux/
 /test/
+!/test/
+!/test/**
 
 # Symbolication related
 app.*.symbols
@@ -54,3 +56,13 @@ app.*.map.json
 *.p12
 *.pem
 key.properties
+
+/Studio/
+/development/
+
+# Build artifacts
+/build/
+/android/app/build/
+/build/app/outputs/flutter-apk/
+*.apk
+*.aab

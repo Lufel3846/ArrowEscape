@@ -47,6 +47,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
   int _lives = AppConstants.maxLives;
   int? _loadedLevelNum;
   bool _isLoadingLevel = false;
+  int _levelLoadRequestId = 0;
 
   Timer? _levelTimer;
   int _timeRemaining = 0;
@@ -75,11 +76,13 @@ class _GameScreenState extends ConsumerState<GameScreen>
   }
 
   Future<void> _loadLevelAsync(int levelNum) async {
+    final requestId = ++_levelLoadRequestId;
     final levelRepo = ref.read(levelRepositoryProvider);
     final progress = ref.read(progressRepositoryProvider);
 
     final useCache = !widget.isRandom || !progress.complexPaths;
     if (useCache && levelRepo.isCached(levelNum)) {
+      if (!mounted || requestId != _levelLoadRequestId) return;
       _level = levelRepo.getLevel(levelNum);
       _initGame();
 
@@ -96,7 +99,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
           ? await levelRepo.getRandomLevelAsync(levelNum,
               complexPaths: progress.complexPaths)
           : await levelRepo.getLevelAsync(levelNum, preGenerateNext: true);
-      if (!mounted) return;
+      if (!mounted || requestId != _levelLoadRequestId) return;
       _level = level;
       _initGame();
       setState(() => _isLoadingLevel = false);
@@ -105,7 +108,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
         levelRepo.preGenerateRangeAsync(levelNum + 1, 5);
       }
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || requestId != _levelLoadRequestId) return;
       _level = levelRepo.getLevel(levelNum);
       _initGame();
       if (mounted) setState(() => _isLoadingLevel = false);

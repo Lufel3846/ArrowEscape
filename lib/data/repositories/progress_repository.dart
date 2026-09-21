@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 
@@ -59,16 +60,20 @@ class ProgressRepository extends ChangeNotifier {
   }
 
   void _load() {
-    _lives = _box.get('lives', defaultValue: AppConstants.maxLives);
-    _currentLevel = _box.get('currentLevel', defaultValue: 1);
-    _highestUnlockedLevel = _box.get('highestUnlockedLevel', defaultValue: 1);
-    final themeStr = _box.get('selectedTheme', defaultValue: GameTheme.classic.name);
-    _selectedTheme = GameTheme.values.firstWhere((t) => t.name == themeStr, orElse: () => GameTheme.classic);
-    _skinsUnlocked = _box.get('skinsUnlocked', defaultValue: false);
-    _hapticsEnabled = _box.get('hapticsEnabled', defaultValue: true);
-    _heartRemover = _box.get('heartRemover', defaultValue: false);
-    _assistMode = _box.get('assistMode', defaultValue: false);
-    _complexPaths = _box.get('complexPaths', defaultValue: false);
+    _lives = _readInt('lives', AppConstants.maxLives);
+    _currentLevel = _readInt('currentLevel', 1);
+    _highestUnlockedLevel = _readInt('highestUnlockedLevel', 1);
+    final themeValue = _box.get('selectedTheme');
+    final themeStr = themeValue is String ? themeValue : GameTheme.classic.name;
+    _selectedTheme = GameTheme.values.firstWhere(
+      (t) => t.name == themeStr,
+      orElse: () => GameTheme.classic,
+    );
+    _skinsUnlocked = _readBool('skinsUnlocked', false);
+    _hapticsEnabled = _readBool('hapticsEnabled', true);
+    _heartRemover = _readBool('heartRemover', false);
+    _assistMode = _readBool('assistMode', false);
+    _complexPaths = _readBool('complexPaths', false);
     AudioHapticHelper.hapticsEnabled = _hapticsEnabled;
 
     for (final key in _resultsBox.keys) {
@@ -86,6 +91,25 @@ class ProgressRepository extends ChangeNotifier {
     }
   }
 
+  int _readInt(String key, int fallback) {
+    final value = _box.get(key);
+    if (value is! int) return fallback;
+    if (key == 'lives') {
+      if (value < 0) return 0;
+      if (value > AppConstants.maxLives) return AppConstants.maxLives;
+      return value;
+    }
+    if (key == 'currentLevel' || key == 'highestUnlockedLevel') {
+      return value < 1 ? 1 : value;
+    }
+    return value;
+  }
+
+  bool _readBool(String key, bool fallback) {
+    final value = _box.get(key);
+    return value is bool ? value : fallback;
+  }
+
   Future<void> _save() async {
     await _box.putAll({
       'lives': _lives,
@@ -100,7 +124,10 @@ class ProgressRepository extends ChangeNotifier {
     });
 
     for (final entry in _levelResults.entries) {
-      await _resultsBox.put(entry.key.toString(), jsonEncode(entry.value.toJson()));
+      await _resultsBox.put(
+        entry.key.toString(),
+        jsonEncode(entry.value.toJson()),
+      );
     }
   }
 
@@ -135,16 +162,23 @@ class ProgressRepository extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool unlockSkins(String code) {
+  Future<bool> unlockSkins(String code) async {
     if (code.trim().toUpperCase() == 'THANKYOU') {
+      final previousValue = _skinsUnlocked;
       _skinsUnlocked = true;
-      _save();
-      notifyListeners();
-      return true;
+      try {
+        await _save();
+        notifyListeners();
+        return true;
+      } catch (e) {
+        _skinsUnlocked = previousValue;
+        debugPrint('Error saving unlocked skins: $e');
+        notifyListeners();
+        return false;
+      }
     }
     return false;
   }
-
 
   Future<void> recordLevelComplete(LevelResult result) async {
     final existing = _levelResults[result.levelNumber];

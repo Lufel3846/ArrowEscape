@@ -1,7 +1,9 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../core/app_colors.dart';
 import '../../core/app_themes.dart';
 import '../../core/audio_haptic_helper.dart';
@@ -42,11 +44,20 @@ class _MultiplayerSeedScreenState extends ConsumerState<MultiplayerSeedScreen> {
   }
 
   int _codeToLevelNumber(String code) {
-    final cleaned = code.trim().toUpperCase().replaceAll('ROOM-', '').replaceAll('AE-', '');
+    final cleaned = code
+        .trim()
+        .toUpperCase()
+        .replaceAll('ROOM-', '')
+        .replaceAll('AE-', '');
     if (cleaned.isEmpty) return 1;
     final parsed = int.tryParse(cleaned);
     if (parsed != null && parsed > 0) return parsed;
-    return (cleaned.hashCode.abs() % 999999) + 1;
+    var hash = 2166136261;
+    for (final unit in cleaned.codeUnits) {
+      hash ^= unit;
+      hash = (hash * 16777619) & 0x7fffffff;
+    }
+    return (hash % 999999) + 1;
   }
 
   void _playRoom(String code) {
@@ -87,7 +98,7 @@ class _MultiplayerSeedScreenState extends ConsumerState<MultiplayerSeedScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          'MULTIPLAYER',
+          'SHARED PUZZLE',
           style: TextStyle(
             fontSize: 22,
             fontWeight: FontWeight.w900,
@@ -126,7 +137,7 @@ class _MultiplayerSeedScreenState extends ConsumerState<MultiplayerSeedScreen> {
                         ),
                         const SizedBox(width: 10),
                         const Text(
-                          'HOST ROOM',
+                          'CREATE CHALLENGE',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w900,
@@ -206,7 +217,7 @@ class _MultiplayerSeedScreenState extends ConsumerState<MultiplayerSeedScreen> {
                       onPressed: () => _playRoom(_roomCode),
                       icon: const Icon(Icons.play_arrow_rounded, size: 24),
                       label: const Text(
-                        'START MATCH',
+                        'START CHALLENGE',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w900,
@@ -223,10 +234,7 @@ class _MultiplayerSeedScreenState extends ConsumerState<MultiplayerSeedScreen> {
                 decoration: BoxDecoration(
                   color: AppColors.surface,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: AppColors.surfaceLight,
-                    width: 1.5,
-                  ),
+                  border: Border.all(color: AppColors.surfaceLight, width: 1.5),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -240,7 +248,7 @@ class _MultiplayerSeedScreenState extends ConsumerState<MultiplayerSeedScreen> {
                         ),
                         const SizedBox(width: 10),
                         const Text(
-                          'JOIN ROOM',
+                          'JOIN CHALLENGE',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w900,
@@ -330,7 +338,7 @@ class _MultiplayerSeedScreenState extends ConsumerState<MultiplayerSeedScreen> {
                       },
                       icon: const Icon(Icons.sports_esports_rounded, size: 24),
                       label: const Text(
-                        'JOIN MATCH',
+                        'PLAY CHALLENGE',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w900,
