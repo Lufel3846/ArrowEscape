@@ -12,7 +12,6 @@ class ProgressRepository extends ChangeNotifier {
   late Box _box;
   late Box _resultsBox;
 
-  int _lives = AppConstants.maxLives;
   int _currentLevel = 1;
   int _highestUnlockedLevel = 1;
   GameTheme _selectedTheme = GameTheme.classic;
@@ -24,12 +23,9 @@ class ProgressRepository extends ChangeNotifier {
 
   final Map<int, LevelResult> _levelResults = {};
 
-  int get lives => _lives;
   int get maxLives => AppConstants.maxLives;
   int get currentLevel => _currentLevel;
   int get highestUnlockedLevel => _highestUnlockedLevel;
-  bool get hasLives => _lives > 0;
-  bool get livesAreFull => _lives >= AppConstants.maxLives;
   GameTheme get selectedTheme => _selectedTheme;
   bool get skinsUnlocked => _skinsUnlocked;
   bool get hapticsEnabled => _hapticsEnabled;
@@ -60,7 +56,6 @@ class ProgressRepository extends ChangeNotifier {
   }
 
   void _load() {
-    _lives = _readInt('lives', AppConstants.maxLives);
     _currentLevel = _readInt('currentLevel', 1);
     _highestUnlockedLevel = _readInt('highestUnlockedLevel', 1);
     final themeValue = _box.get('selectedTheme');
@@ -94,11 +89,6 @@ class ProgressRepository extends ChangeNotifier {
   int _readInt(String key, int fallback) {
     final value = _box.get(key);
     if (value is! int) return fallback;
-    if (key == 'lives') {
-      if (value < 0) return 0;
-      if (value > AppConstants.maxLives) return AppConstants.maxLives;
-      return value;
-    }
     if (key == 'currentLevel' || key == 'highestUnlockedLevel') {
       return value < 1 ? 1 : value;
     }
@@ -112,7 +102,6 @@ class ProgressRepository extends ChangeNotifier {
 
   Future<void> _save() async {
     await _box.putAll({
-      'lives': _lives,
       'currentLevel': _currentLevel,
       'highestUnlockedLevel': _highestUnlockedLevel,
       'selectedTheme': _selectedTheme.name,

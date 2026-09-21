@@ -15,8 +15,10 @@ import '../../data/models/arrow.dart';
 import '../../data/models/level.dart';
 import '../../data/models/level_result.dart';
 import '../../data/repositories/progress_repository.dart';
+import '../../data/repositories/stats_repository.dart';
 import '../../game/arrow_puzzle_game.dart';
 import '../../game/game_state.dart';
+import '../../data/level_generator/solver.dart';
 import '../../widgets/lives_bar.dart';
 import '../../main.dart';
 import '../home/home_screen.dart';
@@ -24,14 +26,20 @@ import '../home/home_screen.dart';
 class GameScreen extends ConsumerStatefulWidget {
   final int level;
   final bool isRandom;
+  final bool isDaily;
   final GameMode gameMode;
+  final LevelModel? customLevel;
 
   const GameScreen({
     super.key,
     required this.level,
     this.isRandom = false,
+    this.isDaily = false,
     this.gameMode = GameMode.classic,
+    this.customLevel,
   });
+
+  bool get isCustom => customLevel != null;
 
   @override
   ConsumerState<GameScreen> createState() => _GameScreenState();
@@ -58,6 +66,10 @@ class _GameScreenState extends ConsumerState<GameScreen>
   int _timeAttackScore = 0;
   bool _showBonusAnimation = false;
   String _bonusText = '';
+  int _maxComboThisLevel = 0;
+  List<Achievement> _pendingAchievements = [];
+  bool _isReplaying = false;
+  int _lastDialogStars = 3;
 
   @override
   void initState() {
@@ -68,6 +80,13 @@ class _GameScreenState extends ConsumerState<GameScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (widget.customLevel != null) {
+      if (_loadedLevelNum != null) return;
+      _loadedLevelNum = -1;
+      _level = widget.customLevel!;
+      _initGame();
+      return;
+    }
     final levelNum = widget.level;
     if (_loadedLevelNum != levelNum) {
       _loadedLevelNum = levelNum;
@@ -83,6 +102,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
     final useCache = !widget.isRandom || !progress.complexPaths;
     if (useCache && levelRepo.isCached(levelNum)) {
       if (!mounted || requestId != _levelLoadRequestId) return;
+      if (_isLoadingLevel) setState(() => _isLoadingLevel = false);
       _level = levelRepo.getLevel(levelNum);
       _initGame();
 
@@ -109,9 +129,18 @@ class _GameScreenState extends ConsumerState<GameScreen>
       }
     } catch (_) {
       if (!mounted || requestId != _levelLoadRequestId) return;
-      _level = levelRepo.getLevel(levelNum);
-      _initGame();
-      if (mounted) setState(() => _isLoadingLevel = false);
+      // Keep the fallback off the UI thread: synchronous generation can
+      // freeze the frame for large (god/boss) grids.
+      try {
+        final level = await levelRepo.getLevelAsync(levelNum);
+        if (!mounted || requestId != _levelLoadRequestId) return;
+        _level = level;
+        _initGame();
+        if (mounted) setState(() => _isLoadingLevel = false);
+      } catch (_) {
+        if (!mounted || requestId != _levelLoadRequestId) return;
+        if (mounted) setState(() => _isLoadingLevel = false);
+      }
     }
   }
 
@@ -120,6 +149,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
   
   String? _comboText;
   Timer? _comboTimer;
+  Timer? _bonusTimer;
 
   void _triggerShake() {
     _shakeTimer?.cancel();
@@ -142,6 +172,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
   void _triggerCombo() {
     if (_gameState == null) return;
     final combo = _gameState!.comboCount;
+    if (combo > _maxComboThisLevel) {
+      _maxComboThisLevel = combo;
+    }
     _comboTimer?.cancel();
     setState(() {
       _comboText = '$combo x COMBO';
@@ -156,7 +189,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
       _bonusText = '+15s';
       _showBonusAnimation = true;
     });
-    Timer(const Duration(milliseconds: 900), () {
+    _bonusTimer?.cancel();
+    _bonusTimer = Timer(const Duration(milliseconds: 900), () {
       if (mounted) {
         setState(() {
           _showBonusAnimation = false;
@@ -182,7 +216,10 @@ class _GameScreenState extends ConsumerState<GameScreen>
         progress.heartRemover;
     _lives = isLifeFree ? 999 : AppConstants.maxLives;
     _showingGameOver = false;
+    _maxComboThisLevel = 0;
+    _pendingAchievements = [];
     _gameState?.removeListener(_onGameStateChanged);
+    _gameState?.dispose();
     _gameState = GameState(
       level: _level,
       theme: progress.selectedTheme,
@@ -194,6 +231,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
       gameMode: widget.gameMode,
       onCombo: _triggerCombo,
       onCameraShake: _triggerShake,
+      onDeadlock: _onDeadlock,
     );
     _gameState!.addListener(_onGameStateChanged);
 
@@ -221,15 +259,41 @@ class _GameScreenState extends ConsumerState<GameScreen>
   }
 
   void _onLevelComplete() {
-    if (!mounted || _showingComplete) return;
+    if (!mounted || _showingComplete || _isReplaying) return;
     _levelTimer?.cancel();
     AudioHapticHelper.playSuccess(isLast: true);
     setState(() => _showingComplete = true);
 
     final progress = ref.read(progressRepositoryProvider);
     final stars = ProgressRepository.calculateStars(_gameState!.livesLost);
+    _lastDialogStars = stars;
 
-    if (!widget.isRandom && widget.gameMode == GameMode.classic) {
+    // Record stats (all modes) and evaluate achievements.
+    if (!widget.isCustom) {
+      final stats = ref.read(statsRepositoryProvider);
+      if (_maxComboThisLevel < _gameState!.comboCount) {
+        _maxComboThisLevel = _gameState!.comboCount;
+      }
+      stats
+          .recordLevelComplete(
+            stars: stars,
+            livesLost: _gameState!.livesLost,
+            maxCombo: _maxComboThisLevel,
+          )
+          .then((unlocked) {
+        if (unlocked.isNotEmpty && mounted) {
+          setState(() => _pendingAchievements = unlocked);
+        }
+      });
+
+      if (widget.isDaily) {
+        stats.recordDailyComplete();
+      }
+    }
+
+    if (!widget.isRandom &&
+        !widget.isCustom &&
+        widget.gameMode == GameMode.classic) {
       progress.recordLevelComplete(LevelResult(
         levelNumber: _level.levelNumber,
         stars: stars,
@@ -259,7 +323,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
     } else {
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted) {
-          _showLevelCompleteDialog(stars);
+          _showLevelCompleteDialog(_lastDialogStars);
         }
       });
     }
@@ -273,19 +337,108 @@ class _GameScreenState extends ConsumerState<GameScreen>
     });
   }
 
-  Future<void> _handleRestart() async {
-    if (mounted) {
-      final isLifeFree = widget.gameMode == GameMode.zen ||
-          widget.gameMode == GameMode.timeAttack ||
-          ref.read(progressRepositoryProvider).heartRemover;
-      setState(() {
-        _showingGameOver = false;
-        _showingComplete = false;
-        _game.resetLevel();
-        _lives = isLifeFree ? 999 : AppConstants.maxLives;
-        _resetTimerForLevel();
-      });
-    }
+  void _onDeadlock() {
+    if (!mounted || _showingGameOver || _showingComplete) return;
+    AudioHapticHelper.playFailure();
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (!mounted || _showingGameOver || _showingComplete) return;
+      _showDeadlockDialog();
+    });
+  }
+
+  Future<void> _showDeadlockDialog() async {
+    final progress = ref.read(progressRepositoryProvider);
+    final themeColors = AppThemes.getThemeColors(progress.selectedTheme);
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(28),
+          decoration: BoxDecoration(
+            color: themeColors.surface,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(
+                color: themeColors.accentColor.withValues(alpha: 0.35),
+                width: 2.5),
+            boxShadow: [
+              BoxShadow(
+                  color: themeColors.accentColor.withValues(alpha: 0.18),
+                  blurRadius: 32),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.lock_outline_rounded,
+                color: themeColors.accentColor,
+                size: 52,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'No Moves Left!',
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Every arrow is blocked. Restart the level to try a different order.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textSecondary,
+                  height: 1.3,
+                ),
+              ),
+              const SizedBox(height: 20),
+              _DialogButton(
+                label: 'Restart Level',
+                icon: Icons.refresh_rounded,
+                textColor: AppColors.textPrimary,
+                iconColor: themeColors.accentColor,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _handleRestart();
+                },
+              ),
+              const SizedBox(height: 10),
+              _DialogButton(
+                label: 'Home',
+                icon: Icons.home_rounded,
+                textColor: AppColors.textSecondary,
+                iconColor: themeColors.accentColor,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (_) => const HomeScreen()),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _handleRestart() {
+    final isLifeFree = widget.gameMode == GameMode.zen ||
+        widget.gameMode == GameMode.timeAttack ||
+        ref.read(progressRepositoryProvider).heartRemover;
+    setState(() {
+      _showingGameOver = false;
+      _showingComplete = false;
+      _game.resetLevel();
+      _lives = isLifeFree ? 999 : AppConstants.maxLives;
+      _resetTimerForLevel();
+    });
   }
 
   Future<bool> _confirmLeaveLevel() async {
@@ -398,16 +551,46 @@ class _GameScreenState extends ConsumerState<GameScreen>
           _LevelCompleteDialog(
             level: _level,
             stars: stars,
-            isRandom: widget.isRandom,
+            isRandom: widget.isRandom || widget.isDaily || widget.isCustom,
+            newAchievements: _pendingAchievements,
             onNextLevel: _handleNextLevel,
             onMenu: _handleMenu,
+            onWatchSolution: _watchSolution,
           ),
         ],
       ),
     );
   }
 
-  Future<void> _handleTimeAttackRestart() async {
+  /// Replays the solved order of the current level on the board.
+  Future<void> _watchSolution() async {
+    if (_isReplaying || _gameState == null || _game.gridComponent == null) {
+      return;
+    }
+    final solution = LevelSolver.solve(_level, 50000);
+    if (solution == null) return;
+
+    Navigator.pop(context); // close the complete dialog
+    setState(() => _isReplaying = true);
+    _gameState!.resetLevel();
+    _gameState!.inputLocked = true;
+    _game.gridComponent!.rebuild();
+
+    await Future.delayed(const Duration(milliseconds: 800));
+    for (final id in solution) {
+      if (!mounted) return;
+      _gameState!.tapArrow(id);
+      await Future.delayed(const Duration(milliseconds: 700));
+    }
+    await Future.delayed(const Duration(milliseconds: 900));
+
+    if (!mounted) return;
+    _gameState!.inputLocked = false;
+    setState(() => _isReplaying = false);
+    _showLevelCompleteDialog(_lastDialogStars);
+  }
+
+  void _handleTimeAttackRestart() {
     setState(() {
       _showingGameOver = false;
       _showingComplete = false;
@@ -478,7 +661,11 @@ class _GameScreenState extends ConsumerState<GameScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _levelTimer?.cancel();
+    _shakeTimer?.cancel();
+    _comboTimer?.cancel();
+    _bonusTimer?.cancel();
     _gameState?.removeListener(_onGameStateChanged);
+    _gameState?.dispose();
     super.dispose();
   }
 
@@ -622,6 +809,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
                 _TopBar(
                   level: _level,
                   isRandom: widget.isRandom,
+                  isDaily: widget.isDaily,
+                  isCustom: widget.isCustom,
                   onBack: _handleBack,
                   gameMode: widget.gameMode,
                   score: _timeAttackScore,
@@ -737,6 +926,13 @@ class _GameScreenState extends ConsumerState<GameScreen>
                 progress: progressVal,
                 gameMode: widget.gameMode,
                 heartRemover: progressState.heartRemover,
+                undosLeft: _gameState?.undosLeft ?? 0,
+                canUndo: _gameState?.canUndo ?? false,
+                onUndo: () {
+                  if (_gameState!.undo()) {
+                    _game.gridComponent?.rebuild();
+                  }
+                },
               ),
             ],
           ),
@@ -848,6 +1044,8 @@ class _TimerDisplay extends ConsumerWidget {
 class _TopBar extends StatelessWidget {
   final LevelModel level;
   final bool isRandom;
+  final bool isDaily;
+  final bool isCustom;
   final VoidCallback onBack;
   final GameMode gameMode;
   final int score;
@@ -855,6 +1053,8 @@ class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.level,
     this.isRandom = false,
+    this.isDaily = false,
+    this.isCustom = false,
     required this.onBack,
     required this.gameMode,
     this.score = 0,
@@ -867,6 +1067,10 @@ class _TopBar extends StatelessWidget {
       titleText = 'Score: $score';
     } else if (gameMode == GameMode.zen) {
       titleText = gameMode.label;
+    } else if (isDaily) {
+      titleText = 'Daily Challenge';
+    } else if (isCustom) {
+      titleText = 'Custom Level';
     } else if (isRandom) {
       titleText = 'Random Mode';
     } else {
@@ -915,12 +1119,18 @@ class _BottomBar extends StatelessWidget {
   final double progress;
   final GameMode gameMode;
   final bool heartRemover;
+  final int undosLeft;
+  final bool canUndo;
+  final VoidCallback onUndo;
 
   const _BottomBar({
     required this.lives,
     required this.progress,
     required this.gameMode,
+    required this.onUndo,
     this.heartRemover = false,
+    this.undosLeft = 0,
+    this.canUndo = false,
   });
 
   @override
@@ -943,6 +1153,40 @@ class _BottomBar extends StatelessWidget {
               ),
             ),
           ),
+          if (undosLeft > 0)
+            GestureDetector(
+              onTap: canUndo ? onUndo : null,
+              child: Opacity(
+                opacity: canUndo ? 1.0 : 0.35,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white24, width: 1),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.undo_rounded,
+                          color: AppColors.textPrimary, size: 16),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$undosLeft',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          else
+            const SizedBox(width: 44),
           if (heartRemover || gameMode == GameMode.timeAttack)
             const SizedBox()
           else if (gameMode == GameMode.zen)
@@ -984,15 +1228,19 @@ class _LevelCompleteDialog extends ConsumerWidget {
   final LevelModel level;
   final int stars;
   final bool isRandom;
+  final List<Achievement> newAchievements;
   final VoidCallback onNextLevel;
   final VoidCallback onMenu;
+  final VoidCallback? onWatchSolution;
 
   const _LevelCompleteDialog({
     required this.level,
     required this.stars,
     this.isRandom = false,
+    this.newAchievements = const [],
     required this.onNextLevel,
     required this.onMenu,
+    this.onWatchSolution,
   });
 
   @override
@@ -1048,6 +1296,62 @@ class _LevelCompleteDialog extends ConsumerWidget {
                               curve: Curves.elasticOut)),
             ),
             const SizedBox(height: 24),
+            if (newAchievements.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: themeColors.accentColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: themeColors.accentColor.withValues(alpha: 0.5),
+                    width: 1.5,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    for (final achievement in newAchievements) ...[
+                      Row(
+                        children: [
+                          Icon(achievement.icon,
+                              color: themeColors.accentColor, size: 26),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Achievement: ${achievement.title}',
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                                Text(
+                                  achievement.description,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (achievement != newAchievements.last)
+                        const SizedBox(height: 10),
+                    ],
+                  ],
+                ),
+              ).animate().scale(
+                    begin: const Offset(0.85, 0.85),
+                    end: const Offset(1, 1),
+                    duration: 300.ms,
+                    curve: Curves.easeOutBack,
+                  ),
+              const SizedBox(height: 20),
+            ],
             if (level.levelNumber == 500) ...[
               Container(
                 padding: const EdgeInsets.all(16),
@@ -1095,6 +1399,16 @@ class _LevelCompleteDialog extends ConsumerWidget {
                 label: 'Next Level',
                 icon: Icons.play_arrow_rounded,
                 onTap: onNextLevel,
+              ),
+              const SizedBox(height: 10),
+            ],
+            if (onWatchSolution != null) ...[
+              _DialogButton(
+                label: 'Watch Solution',
+                icon: Icons.play_circle_outline_rounded,
+                textColor: AppColors.textPrimary,
+                iconColor: themeColors.accentColor,
+                onTap: onWatchSolution!,
               ),
               const SizedBox(height: 10),
             ],

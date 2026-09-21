@@ -9,7 +9,10 @@ import '../../core/app_themes.dart';
 import '../../core/constants.dart';
 import '../../core/audio_haptic_helper.dart';
 import '../../core/game_mode.dart';
+import '../../data/repositories/stats_repository.dart';
 import '../../main.dart';
+import '../achievements/achievements_screen.dart';
+import '../editor/level_editor_screen.dart';
 import '../game/game_screen.dart';
 import '../level_select/level_select_screen.dart';
 import '../multiplayer/multiplayer_seed_screen.dart';
@@ -163,6 +166,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (mounted) setState(() => _isNavigating = false);
   }
 
+  void _playDailyChallenge() {
+    final today = DateTime.now();
+    final dailyLevel = StatsRepository.dailyLevelFor(today);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GameScreen(level: dailyLevel, isDaily: true),
+      ),
+    );
+  }
+
   void _showArcadeModesSelection(BuildContext context, int currentLevel) {
     final progress = ref.read(progressRepositoryProvider);
     final themeColors = AppThemes.getThemeColors(progress.selectedTheme);
@@ -290,6 +304,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final progress = ref.watch(progressRepositoryProvider);
+    final stats = ref.watch(statsRepositoryProvider);
     final themeColors = AppThemes.getThemeColors(progress.selectedTheme);
 
     return Scaffold(
@@ -419,9 +434,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
               const Spacer(flex: 3),
 
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Column(
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Column(
                   children: AnimateList(
                     interval: 100.ms,
                     effects: [
@@ -448,6 +464,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 if (mounted) setState(() => _isNavigating = false);
                               },
                         showBorder: false,
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      _DailyChallengeButton(
+                        streak: stats.dailyStreak,
+                        completedToday: stats.isDailyCompletedToday,
+                        onTap: _isNavigating ? null : _playDailyChallenge,
                       ),
 
                       const SizedBox(height: 14),
@@ -491,6 +515,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       const SizedBox(height: 14),
 
                       _MenuButton(
+                        label: 'EDITOR',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const LevelEditorScreen()),
+                        ),
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      _MenuButton(
+                        label: 'ACHIEVEMENTS',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const AchievementsScreen()),
+                        ),
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      _MenuButton(
                         label: 'SETTINGS',
                         onTap: () => Navigator.push(
                           context,
@@ -500,11 +546,134 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ],
                   ),
                 ),
+                ),
               ),
 
               const Spacer(flex: 2),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DailyChallengeButton extends ConsumerWidget {
+  final int streak;
+  final bool completedToday;
+  final VoidCallback? onTap;
+
+  const _DailyChallengeButton({
+    required this.streak,
+    required this.completedToday,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final progress = ref.watch(progressRepositoryProvider);
+    final themeColors = AppThemes.getThemeColors(progress.selectedTheme);
+
+    return GestureDetector(
+      onTap: () {
+        if (onTap != null) {
+          AudioHapticHelper.playClick();
+          onTap!();
+        }
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: completedToday ? Colors.greenAccent : themeColors.accentColor,
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: themeColors.accentDark,
+              offset: const Offset(0, 5),
+              blurRadius: 0,
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: completedToday
+                    ? Colors.greenAccent.withValues(alpha: 0.15)
+                    : const Color(0xFFFF6B35).withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                completedToday
+                    ? Icons.check_circle_rounded
+                    : Icons.local_fire_department_rounded,
+                color:
+                    completedToday ? Colors.greenAccent : const Color(0xFFFF6B35),
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'DAILY CHALLENGE',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.textPrimary,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    completedToday
+                        ? 'Completed — come back tomorrow!'
+                        : 'A new puzzle every day',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (streak > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF6B35).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.local_fire_department_rounded,
+                      color: Color(0xFFFF6B35),
+                      size: 14,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$streak',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFFFF6B35),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
         ),
       ),
     );

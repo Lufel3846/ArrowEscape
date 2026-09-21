@@ -1,12 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../data/models/arrow.dart';
 import '../data/models/level.dart';
 import '../core/constants.dart';
 import '../core/app_themes.dart';
 import '../core/game_mode.dart';
+import 'path_simulation.dart';
 
 class GameState extends ChangeNotifier {
-  
+  bool _disposed = false;
+  Timer? _blockResetTimer;
+
   late LevelModel _currentLevel;
   late List<ArrowModel> _arrows;
   int _lives = AppConstants.maxLives;
@@ -20,6 +25,8 @@ class GameState extends ChangeNotifier {
   final bool assistMode;
 
   late Map<String, OrphanDotType> _orphanDots;
+
+  final Map<String, ArrowState> _stateById = {};
 
   final Map<String, List<OrphanDot>> _consumedDotsByArrow = {};
 
@@ -52,6 +59,9 @@ class GameState extends ChangeNotifier {
   }) {
     _currentLevel = level;
     _arrows = level.arrows.map((a) => a.copyWith()).toList();
+    _stateById
+      ..clear()
+      ..addEntries([for (final a in _arrows) MapEntry(a.id, a.state)]);
     _orphanDots = {for (final od in level.orphanDots) od.key: od.type};
     _lives = (gameMode == GameMode.zen || gameMode == GameMode.timeAttack || heartRemover) ? 999 : AppConstants.maxLives;
   }
@@ -67,12 +77,12 @@ class GameState extends ChangeNotifier {
   Map<String, OrphanDotType> get orphanDots => _orphanDots;
 
   ArrowState? stateForArrow(String arrowId) {
-    final index = _arrows.indexWhere((a) => a.id == arrowId);
-    return index == -1 ? null : _arrows[index].state;
+    return _stateById[arrowId];
   }
 
   void handleArrowExitCompleted(String arrowId) {
     _arrows.removeWhere((a) => a.id == arrowId);
+    _stateById.remove(arrowId);
     _consumedDotsByArrow.remove(arrowId);
 
     if (_arrows.isEmpty) {
@@ -90,8 +100,9 @@ class GameState extends ChangeNotifier {
   bool checkDeadlock() {
     if (_arrows.isEmpty) return false;
 
+    final blockers = _blockedCellsFor();
     for (final arrow in _arrows) {
-      final exit = _computeExitInfo(arrow);
+      final exit = _computeExitInfo(arrow, blockers);
       if (!exit.blocked) {
         return false;
       }
@@ -129,8 +140,56 @@ class GameState extends ChangeNotifier {
     _consumedDotsByArrow[arrowId] = dots;
   }
 
+  static const int maxUndos = 1;
+  int _undosLeft = maxUndos;
+  _UndoSnapshot? _undoSnapshot;
+
+  int get undosLeft => _undosLeft;
+  bool get canUndo =>
+      !_isComplete && !_isGameOver && _undosLeft > 0 && _undoSnapshot != null;
+
+  /// When true, player taps are ignored (used by solution replay).
+  bool inputLocked = false;
+
+  void _captureUndoSnapshot() {
+    _undoSnapshot = _UndoSnapshot(
+      arrows: [for (final a in _arrows) a.copyWith()],
+      orphanDots: Map.of(_orphanDots),
+      lives: _lives,
+      livesLost: _livesLost,
+      lastExitTime: _lastExitTime,
+      comboCount: _comboCount,
+    );
+  }
+
+  /// Restores the board to the state before the last tap (one per level).
+  /// Returns true if the undo was applied.
+  bool undo() {
+    if (!canUndo) return false;
+    if (_arrows.any((a) => a.state == ArrowState.sliding)) return false;
+
+    final snap = _undoSnapshot!;
+    _blockResetTimer?.cancel();
+    _blockResetTimer = null;
+    _arrows = [for (final a in snap.arrows) a.copyWith()];
+    _stateById
+      ..clear()
+      ..addEntries([for (final a in _arrows) MapEntry(a.id, a.state)]);
+    _orphanDots = Map.of(snap.orphanDots);
+    _consumedDotsByArrow.clear();
+    _lives = snap.lives;
+    _livesLost = snap.livesLost;
+    _lastExitTime = snap.lastExitTime;
+    _comboCount = snap.comboCount;
+    _undoSnapshot = null;
+    _undosLeft--;
+    notifyListeners();
+    return true;
+  }
+
   TapResult tapArrow(String arrowId) {
     if (_isComplete || _isGameOver) return TapResult.ignored;
+    if (inputLocked) return TapResult.ignored;
 
     final index = _arrows.indexWhere((a) => a.id == arrowId);
     if (index == -1) return TapResult.ignored;
@@ -139,6 +198,8 @@ class GameState extends ChangeNotifier {
     if (arrow.state != ArrowState.idle) {
       return TapResult.ignored;
     }
+
+    _captureUndoSnapshot();
 
     final exitInfo = _computeExitInfo(arrow);
     if (exitInfo.blocked) {
@@ -159,6 +220,7 @@ class GameState extends ChangeNotifier {
     _lastExitTime = now;
 
     _arrows[index] = arrow.copyWith(state: ArrowState.sliding);
+    _stateById[arrowId] = ArrowState.sliding;
     _recordConsumedDots(arrowId, exitInfo.consumed);
     
     for (final k in exitInfo.consumed) {
@@ -171,16 +233,20 @@ class GameState extends ChangeNotifier {
 
   TapResult _handleBlocked(int index, ArrowModel arrow, String arrowId) {
     _arrows[index] = arrow.copyWith(state: ArrowState.blocked);
+    _stateById[arrowId] = ArrowState.blocked;
     if (gameMode != GameMode.zen && gameMode != GameMode.timeAttack && !heartRemover) {
       _lives--;
       _livesLost++;
       onLifeLost();
     }
  
-    Future.delayed(AppConstants.arrowShakeDuration, () {
+    _blockResetTimer?.cancel();
+    _blockResetTimer = Timer(AppConstants.arrowShakeDuration, () {
+      if (_disposed) return;
       final idx = _arrows.indexWhere((a) => a.id == arrowId);
-      if (idx != -1) {
+      if (idx != -1 && _arrows[idx].state == ArrowState.blocked) {
         _arrows[idx] = _arrows[idx].copyWith(state: ArrowState.idle);
+        _stateById[arrowId] = ArrowState.idle;
         notifyListeners();
       }
     });
@@ -196,55 +262,55 @@ class GameState extends ChangeNotifier {
     return TapResult.blocked;
   }
 
-  _ExitInfo _computeExitInfo(ArrowModel arrow) {
-    ArrowDirection currentDir = arrow.direction;
-    final head = arrow.path[0];
-    final gridSize = _currentLevel.gridSize;
-    var d = currentDir.delta;
-    int nr = head[0] + d[0];
-    int nc = head[1] + d[1];
-    final consumed = <String>[];
-    final visited = <String>{};
+  @override
+  void notifyListeners() {
+    if (_disposed) return;
+    super.notifyListeners();
+  }
 
-    while (nr >= 0 && nr < gridSize && nc >= 0 && nc < gridSize) {
-      final key = '$nr,$nc';
-      if (visited.contains(key)) return const _ExitInfo(true);
-      visited.add(key);
+  @override
+  void dispose() {
+    _disposed = true;
+    _blockResetTimer?.cancel();
+    _blockResetTimer = null;
+    super.dispose();
+  }
 
-      if (_orphanDots.containsKey(key)) {
-        consumed.add(key);
-        final dotType = _orphanDots[key]!;
-        if (dotType == OrphanDotType.up) {
-          currentDir = ArrowDirection.up;
-        } else if (dotType == OrphanDotType.down) {
-          currentDir = ArrowDirection.down;
-        } else if (dotType == OrphanDotType.left) {
-          currentDir = ArrowDirection.left;
-        } else if (dotType == OrphanDotType.right) {
-          currentDir = ArrowDirection.right;
-        }
-      } else {
-        bool hit = false;
-        for (final other in _arrows) {
-          if (other.id == arrow.id) continue;
-          if (other.state == ArrowState.sliding) continue;
-          for (final pt in other.path) {
-            if (pt[0] == nr && pt[1] == nc) { hit = true; break; }
-          }
-          if (hit) break;
-        }
-        if (hit) return const _ExitInfo(true);
+  _ExitInfo _computeExitInfo(ArrowModel arrow, [Set<String>? blockedCells]) {
+    final blockers =
+        blockedCells ?? _blockedCellsFor(excludeId: arrow.id);
+    final sim = PathSimulation.simulateExit(
+      arrow: arrow,
+      gridSize: _currentLevel.gridSize,
+      blockedCells: blockers,
+      orphanDots: _orphanDots,
+    );
+    return _ExitInfo(sim.blocked, sim.consumedDotKeys);
+  }
+
+  /// Cells occupied by arrows that still physically block movement
+  /// (every arrow except the excluded one and any already sliding).
+  Set<String> _blockedCellsFor({String? excludeId}) {
+    final cells = <String>{};
+    for (final other in _arrows) {
+      if (other.id == excludeId) continue;
+      if (other.state == ArrowState.sliding) continue;
+      for (final pt in other.path) {
+        cells.add('${pt[0]},${pt[1]}');
       }
-
-      d = currentDir.delta;
-      nr += d[0];
-      nc += d[1];
     }
-    return _ExitInfo(false, consumed);
+    return cells;
   }
 
   void resetLevel() {
+    _blockResetTimer?.cancel();
+    _blockResetTimer = null;
+    _undoSnapshot = null;
+    _undosLeft = maxUndos;
     _arrows = _currentLevel.arrows.map((a) => a.copyWith(state: ArrowState.idle)).toList();
+    _stateById
+      ..clear()
+      ..addEntries([for (final a in _arrows) MapEntry(a.id, a.state)]);
     _orphanDots = {for (final od in _currentLevel.orphanDots) od.key: od.type};
     _consumedDotsByArrow.clear();
     _lives = (gameMode == GameMode.zen || gameMode == GameMode.timeAttack || heartRemover) ? 999 : AppConstants.maxLives;
@@ -256,6 +322,7 @@ class GameState extends ChangeNotifier {
   }
 
   void restoreLife() {
+    if (_disposed) return;
     if (_lives < AppConstants.maxLives) {
       _lives++;
       if (_isGameOver && _lives > 0) {
@@ -265,8 +332,18 @@ class GameState extends ChangeNotifier {
     }
   }
 
-  void forceGameOver() {
-    _isGameOver = true;
+  /// Immediately returns blocked arrows to idle without waiting for the
+  /// shake animation (used by tests to reach deterministic states).
+  void resetBlockStateForTest() {
+    for (var i = 0; i < _arrows.length; i++) {
+      if (_arrows[i].state == ArrowState.blocked) {
+        _arrows[i] = _arrows[i].copyWith(state: ArrowState.idle);
+        _stateById[_arrows[i].id] = ArrowState.idle;
+      }
+    }
+  }
+
+  void forceGameOver() {    _isGameOver = true;
     onGameOver();
     notifyListeners();
   }
@@ -278,6 +355,24 @@ class GameState extends ChangeNotifier {
 }
 
 enum TapResult { exited, blocked, ignored }
+
+class _UndoSnapshot {
+  final List<ArrowModel> arrows;
+  final Map<String, OrphanDotType> orphanDots;
+  final int lives;
+  final int livesLost;
+  final DateTime? lastExitTime;
+  final int comboCount;
+
+  const _UndoSnapshot({
+    required this.arrows,
+    required this.orphanDots,
+    required this.lives,
+    required this.livesLost,
+    required this.lastExitTime,
+    required this.comboCount,
+  });
+}
 
 class _ExitInfo {
   final bool blocked;

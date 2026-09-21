@@ -7,6 +7,7 @@ import 'core/app_colors.dart';
 import 'core/audio_haptic_helper.dart';
 import 'data/repositories/progress_repository.dart';
 import 'data/repositories/level_repository.dart';
+import 'data/repositories/stats_repository.dart';
 import 'screens/home/home_screen.dart';
 
 void main() async {
@@ -26,12 +27,14 @@ void main() async {
 
   final progressRepo = await ProgressRepository.create();
   final levelRepo = await LevelRepository.create();
+  final statsRepo = await StatsRepository.create();
 
   runApp(
     ProviderScope(
       overrides: [
         progressRepositoryProvider.overrideWith((ref) => progressRepo),
         levelRepositoryProvider.overrideWithValue(levelRepo),
+        statsRepositoryProvider.overrideWith((ref) => statsRepo),
       ],
       child: const ArrowPuzzleApp(),
     ),
@@ -67,5 +70,9 @@ final progressRepositoryProvider = ChangeNotifierProvider<ProgressRepository>((r
 });
 
 final levelRepositoryProvider = Provider<LevelRepository>((ref) {
+  throw UnimplementedError('Must be overridden');
+});
+
+final statsRepositoryProvider = ChangeNotifierProvider<StatsRepository>((ref) {
   throw UnimplementedError('Must be overridden');
 });
