@@ -138,6 +138,30 @@ void main() {
       expect(state.stateForArrow('a'), ArrowState.idle);
     });
 
+    test('two arrows blocked in sequence each reset independently', () async {
+      // Regression: the single shared reset timer meant blocking arrow 'b'
+      // cancelled the pending reset of arrow 'a', leaving 'a' permanently
+      // grey and immovable.
+      final lvl = level(arrows: [
+        arrow('a', [[0, 0]], ArrowDirection.down),
+        arrow('c', [[2, 0]], ArrowDirection.up),
+        arrow('b', [[0, 4]], ArrowDirection.down),
+        arrow('d', [[2, 4]], ArrowDirection.up),
+      ]);
+      final state = buildState(lvl);
+
+      expect(state.tapArrow('a'), TapResult.blocked);
+      expect(state.tapArrow('b'), TapResult.blocked);
+      expect(state.stateForArrow('a'), ArrowState.blocked);
+      expect(state.stateForArrow('b'), ArrowState.blocked);
+
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Both arrows must recover — b's block must not swallow a's timer.
+      expect(state.stateForArrow('a'), ArrowState.idle);
+      expect(state.stateForArrow('b'), ArrowState.idle);
+    });
+
     test('losing all lives triggers game over and blocks further taps', () async {
       var gameOver = false;
       final lvl = level(arrows: [

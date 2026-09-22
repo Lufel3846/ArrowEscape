@@ -367,6 +367,9 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
         _isBlockedAnimating = false;
         _isAnimating = false;
         _invalidateCache();
+        // Let the GameState know the block animation is over — it may
+        // reset the arrow to idle (idempotent if the timer already did).
+        gameState.handleBlockAnimationCompleted(arrowModel.id);
       }
     }
   }

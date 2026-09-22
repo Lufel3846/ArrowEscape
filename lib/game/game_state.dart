@@ -10,7 +10,7 @@ import 'path_simulation.dart';
 
 class GameState extends ChangeNotifier {
   bool _disposed = false;
-  Timer? _blockResetTimer;
+  final Map<String, Timer> _blockResetTimers = {};
 
   late LevelModel _currentLevel;
   late List<ArrowModel> _arrows;
@@ -173,8 +173,10 @@ class GameState extends ChangeNotifier {
     if (_arrows.any((a) => a.state == ArrowState.sliding)) return false;
 
     final snap = _undoSnapshot!;
-    _blockResetTimer?.cancel();
-    _blockResetTimer = null;
+    for (final timer in _blockResetTimers.values) {
+      timer.cancel();
+    }
+    _blockResetTimers.clear();
     // Sliding/blocked are transient states owned by in-flight animations.
     // A snapshot can legitimately contain them (e.g. an arrow that was
     // still animating when the next tap happened). Restoring them as-is
@@ -251,15 +253,12 @@ class GameState extends ChangeNotifier {
       onLifeLost();
     }
  
-    _blockResetTimer?.cancel();
-    _blockResetTimer = Timer(AppConstants.arrowShakeDuration, () {
-      if (_disposed) return;
-      final idx = _arrows.indexWhere((a) => a.id == arrowId);
-      if (idx != -1 && _arrows[idx].state == ArrowState.blocked) {
-        _arrows[idx] = _arrows[idx].copyWith(state: ArrowState.idle);
-        _stateById[arrowId] = ArrowState.idle;
-        notifyListeners();
-      }
+    // Per-arrow timer so blocking one arrow never cancels another's reset.
+    // The component also calls handleBlockAnimationCompleted when its own
+    // animation finishes; both paths are idempotent.
+    _blockResetTimers.remove(arrowId)?.cancel();
+    _blockResetTimers[arrowId] = Timer(AppConstants.arrowShakeDuration, () {
+      _resetBlockedArrow(arrowId);
     });
  
     if (gameMode != GameMode.zen && gameMode != GameMode.timeAttack && !heartRemover && _lives <= 0) {
@@ -282,9 +281,30 @@ class GameState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    _blockResetTimer?.cancel();
-    _blockResetTimer = null;
+    for (final timer in _blockResetTimers.values) {
+      timer.cancel();
+    }
+    _blockResetTimers.clear();
     super.dispose();
+  }
+
+  /// Returns a blocked arrow to idle. Called by the per-arrow reset timer
+  /// and by the ArrowComponent when its block animation finishes — both
+  /// are idempotent.
+  void _resetBlockedArrow(String arrowId) {
+    if (_disposed) return;
+    _blockResetTimers.remove(arrowId)?.cancel();
+    final idx = _arrows.indexWhere((a) => a.id == arrowId);
+    if (idx != -1 && _arrows[idx].state == ArrowState.blocked) {
+      _arrows[idx] = _arrows[idx].copyWith(state: ArrowState.idle);
+      _stateById[arrowId] = ArrowState.idle;
+      notifyListeners();
+    }
+  }
+
+  /// Called by the ArrowComponent when its block animation completes.
+  void handleBlockAnimationCompleted(String arrowId) {
+    _resetBlockedArrow(arrowId);
   }
 
   _ExitInfo _computeExitInfo(ArrowModel arrow, [Set<String>? blockedCells]) {
@@ -314,8 +334,10 @@ class GameState extends ChangeNotifier {
   }
 
   void resetLevel() {
-    _blockResetTimer?.cancel();
-    _blockResetTimer = null;
+    for (final timer in _blockResetTimers.values) {
+      timer.cancel();
+    }
+    _blockResetTimers.clear();
     _undoSnapshot = null;
     _undosLeft = maxUndos;
     _arrows = _currentLevel.arrows.map((a) => a.copyWith(state: ArrowState.idle)).toList();
@@ -346,10 +368,9 @@ class GameState extends ChangeNotifier {
   /// Immediately returns blocked arrows to idle without waiting for the
   /// shake animation (used by tests to reach deterministic states).
   void resetBlockStateForTest() {
-    for (var i = 0; i < _arrows.length; i++) {
-      if (_arrows[i].state == ArrowState.blocked) {
-        _arrows[i] = _arrows[i].copyWith(state: ArrowState.idle);
-        _stateById[_arrows[i].id] = ArrowState.idle;
+    for (final a in _arrows) {
+      if (a.state == ArrowState.blocked) {
+        _resetBlockedArrow(a.id);
       }
     }
   }
