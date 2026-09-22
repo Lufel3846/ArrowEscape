@@ -319,8 +319,36 @@ void main() {
       expect(state.canUndo, isFalse);
     });
 
-    test('undo restores a life lost by a blocked tap', () {
+    test('arrows stuck as sliding in a snapshot are restored to idle', () {
+      // Reproduces the "stuck arrow after undo" bug:
+      // 1. Tap arrow 'a' — it starts sliding (animation in flight).
+      // 2. Tap arrow 'b' before 'a' finishes — the snapshot captures 'a'
+      //    as sliding.
+      // 3. Both animations complete and both arrows leave the board.
+      // 4. Undo — 'a' must come back as idle (movable), not sliding.
       final lvl = level(arrows: [
+        arrow('a', [[0, 2]], ArrowDirection.up),
+        arrow('b', [[0, 4]], ArrowDirection.up),
+        arrow('c', [[2, 2]], ArrowDirection.up),
+      ]);
+      final state = buildState(lvl);
+
+      state.tapArrow('a'); // sliding, animation in flight
+      state.tapArrow('b'); // snapshot captures 'a' as sliding
+      state.handleArrowExitCompleted('a');
+      state.handleArrowExitCompleted('b');
+
+      expect(state.undo(), isTrue);
+      expect(state.stateForArrow('a'), ArrowState.idle);
+      expect(state.stateForArrow('b'), ArrowState.idle);
+
+      // Both arrows must be movable again.
+      expect(state.tapArrow('a'), TapResult.exited);
+      state.handleArrowExitCompleted('a');
+      expect(state.tapArrow('b'), TapResult.exited);
+    });
+
+    test('undo restores a life lost by a blocked tap', () {      final lvl = level(arrows: [
         arrow('a', [[0, 2]], ArrowDirection.down),
         arrow('b', [
           [2, 2]

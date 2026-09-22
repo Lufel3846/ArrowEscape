@@ -69,4 +69,9 @@ class ArrowPuzzleGame extends FlameGame {
     gameState.resetLevel();
     gridComponent?.rebuild();
   }
+
+  /// Programmatically plays the exit move for [arrowId] (solution replay).
+  void triggerArrow(String id) {
+    gridComponent?.triggerArrow(id);
+  }
 }

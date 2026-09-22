@@ -164,6 +164,12 @@ class GridComponent extends PositionComponent with TapCallbacks {
     _invalidateDotGrid();
   }
 
+  /// Programmatically plays the exit move for [arrowId] (solution replay).
+  /// Unlike user taps, this works while the game input is locked.
+  void triggerArrow(String id) {
+    _arrowComponents[id]?.triggerMove(fromReplay: true);
+  }
+
   void resize(double newGridPixelSize) {
     gridPixelSize = newGridPixelSize;
     size = Vector2.all(gridPixelSize);

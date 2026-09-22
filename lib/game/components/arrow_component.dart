@@ -154,11 +154,12 @@ class ArrowComponent extends PositionComponent with TapCallbacks {
     _previewPath = null;
   }
 
-  void triggerMove() {
+  void triggerMove({bool fromReplay = false}) {
     if (_isAnimating) return;
+    if (gameState.inputLocked && !fromReplay) return;
     _isAnimating = true;
 
-    final result = gameState.tapArrow(arrowModel.id);
+    final result = gameState.tapArrow(arrowModel.id, force: fromReplay);
     switch (result) {
       case TapResult.exited:
         AudioHapticHelper.playSuccess(combo: gameState.comboCount);

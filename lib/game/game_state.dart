@@ -146,7 +146,11 @@ class GameState extends ChangeNotifier {
 
   int get undosLeft => _undosLeft;
   bool get canUndo =>
-      !_isComplete && !_isGameOver && _undosLeft > 0 && _undoSnapshot != null;
+      !_isComplete &&
+      !_isGameOver &&
+      _undosLeft > 0 &&
+      _undoSnapshot != null &&
+      !_arrows.any((a) => a.state == ArrowState.sliding);
 
   /// When true, player taps are ignored (used by solution replay).
   bool inputLocked = false;
@@ -171,7 +175,14 @@ class GameState extends ChangeNotifier {
     final snap = _undoSnapshot!;
     _blockResetTimer?.cancel();
     _blockResetTimer = null;
-    _arrows = [for (final a in snap.arrows) a.copyWith()];
+    // Sliding/blocked are transient states owned by in-flight animations.
+    // A snapshot can legitimately contain them (e.g. an arrow that was
+    // still animating when the next tap happened). Restoring them as-is
+    // would leave the arrow permanently stuck — its animation component
+    // is already gone, so nothing would ever set it back to idle.
+    _arrows = [
+      for (final a in snap.arrows) a.copyWith(state: ArrowState.idle)
+    ];
     _stateById
       ..clear()
       ..addEntries([for (final a in _arrows) MapEntry(a.id, a.state)]);
@@ -187,9 +198,9 @@ class GameState extends ChangeNotifier {
     return true;
   }
 
-  TapResult tapArrow(String arrowId) {
+  TapResult tapArrow(String arrowId, {bool force = false}) {
     if (_isComplete || _isGameOver) return TapResult.ignored;
-    if (inputLocked) return TapResult.ignored;
+    if (inputLocked && !force) return TapResult.ignored;
 
     final index = _arrows.indexWhere((a) => a.id == arrowId);
     if (index == -1) return TapResult.ignored;

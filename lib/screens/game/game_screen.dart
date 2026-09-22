@@ -578,9 +578,19 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
     await Future.delayed(const Duration(milliseconds: 800));
     for (final id in solution) {
-      if (!mounted) return;
-      _gameState!.tapArrow(id);
-      await Future.delayed(const Duration(milliseconds: 700));
+      if (!mounted || !_isReplaying) return;
+      // Drive the real component so the exit animation actually plays.
+      _game.triggerArrow(id);
+      // Wait until this arrow has fully left the board before the next
+      // move, so the replay visibly follows the solution order.
+      final deadline =
+          DateTime.now().add(const Duration(milliseconds: 3000));
+      while (mounted &&
+          _isReplaying &&
+          _gameState!.arrows.any((a) => a.id == id) &&
+          DateTime.now().isBefore(deadline)) {
+        await Future.delayed(const Duration(milliseconds: 60));
+      }
     }
     await Future.delayed(const Duration(milliseconds: 900));
 
